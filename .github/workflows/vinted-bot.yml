@@ -1,0 +1,63 @@
+name: Vinted Deal Finder
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  find-deals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: 📥 Checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: 📦 Install
+      run: |
+        pip install -r requirements.txt
+    
+    - name: 📂 Restore cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          notified_deals.json
+          bot_stats.json
+        key: vinted-cache-${{ github.run_number }}
+        restore-keys: vinted-cache-
+    
+    - name: 🔥 Run Bot
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        SEARCH_QUERY: ${{ secrets.SEARCH_QUERY }}
+        MAX_PRICE: ${{ secrets.MAX_PRICE }}
+        MIN_PRICE: ${{ secrets.MIN_PRICE }}
+      run: python vinted_bot.py
+    
+    - name: 💾 Save cache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          notified_deals.json
+          bot_stats.json
+        key: vinted-cache-${{ github.run_number }}
+    
+    - name: 📤 Commit updates
+      if: always()
+      continue-on-error: true
+      run: |
+        git config --local user.email "actions@github.com"
+        git config --local user.name "GitHub Actions"
+        git add -f notified_deals.json bot_stats.json 2>/dev/null || true
+        git diff --quiet && git diff --staged --quiet || git commit -m "🤖 Update [skip ci]"
+        git push || true
