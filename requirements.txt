@@ -1,0 +1,2 @@
+# Vinted Deal Finder - GitHub Actions
+requests>=2.31.0
