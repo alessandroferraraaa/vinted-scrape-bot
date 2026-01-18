@@ -10,15 +10,35 @@ from typing import List, Dict
 from vinted_scraper import VintedScraper
 
 # ============================================
-# CONFIGURAZIONE
+# CONFIGURAZIONE CON GESTIONE VALORI VUOTI
 # ============================================
 
+def get_float_env(key: str, default: float) -> float:
+    """Ottiene variabile ambiente come float, gestendo valori vuoti"""
+    value = os.getenv(key, "")
+    if not value or value.strip() == "":
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+def get_int_env(key: str, default: int) -> int:
+    """Ottiene variabile ambiente come int, gestendo valori vuoti"""
+    value = os.getenv(key, "")
+    if not value or value.strip() == "":
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
 CONFIG = {
-    "search_query": os.getenv("SEARCH_QUERY", "tuta calcio"),
-    "max_price": float(os.getenv("MAX_PRICE", "20")),
-    "min_price": float(os.getenv("MIN_PRICE", "1")),
-    "max_items": int(os.getenv("MAX_ITEMS", "50")),
-    "discord_webhook_url": os.getenv("DISCORD_WEBHOOK_URL", ""),
+    "search_query": os.getenv("SEARCH_QUERY", "").strip() or "tuta calcio",
+    "max_price": get_float_env("MAX_PRICE", 20.0),
+    "min_price": get_float_env("MIN_PRICE", 1.0),
+    "max_items": get_int_env("MAX_ITEMS", 50),
+    "discord_webhook_url": os.getenv("DISCORD_WEBHOOK_URL", "").strip(),
     "notified_deals_file": "notified_deals.json",
     "stats_file": "bot_stats.json"
 }
