@@ -1,1 +1,0 @@
-# vinted-scrape-bot
