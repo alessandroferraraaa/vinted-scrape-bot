@@ -67,8 +67,24 @@ class ImageAnalyzer:
                 blocked_hosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
                 if hostname_lower in blocked_hosts:
                     return None
-                # Blocca IP privati (pattern semplice)
-                if hostname_lower.startswith(('10.', '172.16.', '192.168.', '169.254.')):
+                
+                # Blocca IP privati (RFC 1918)
+                if hostname_lower.startswith('10.'):
+                    return None
+                if hostname_lower.startswith('192.168.'):
+                    return None
+                # 172.16.0.0/12 range (172.16.0.0 - 172.31.255.255)
+                if hostname_lower.startswith('172.'):
+                    parts = hostname_lower.split('.')
+                    if len(parts) >= 2:
+                        try:
+                            second_octet = int(parts[1])
+                            if 16 <= second_octet <= 31:
+                                return None
+                        except ValueError:
+                            pass
+                # Blocca link-local
+                if hostname_lower.startswith('169.254.'):
                     return None
             
             response = requests.get(url, timeout=10)
@@ -90,8 +106,8 @@ class ImageAnalyzer:
         elif image_data.startswith(b'GIF87a') or image_data.startswith(b'GIF89a'):
             return "image/gif"
         elif image_data.startswith(b'RIFF') and len(image_data) >= 12:
-            # Check if it's WebP by looking at bytes 8-12
-            if b'WEBP' in image_data[8:12]:
+            # WebP files have 'WEBP' at bytes 8-11 (exact match)
+            if image_data[8:12] == b'WEBP':
                 return "image/webp"
         # Default to JPEG if unknown
         return "image/jpeg"
