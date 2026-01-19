@@ -75,6 +75,30 @@ Aggiungi altri secrets per personalizzare:
 | `MAX_PRICE` | `20` | Prezzo massimo € |
 | `MIN_PRICE` | `1` | Prezzo minimo € |
 
+## 🔑 Configurazione Verifica Foto (GRATIS con Gemini!)
+
+La verifica foto usa **Google Gemini** che è **GRATUITO** (60 richieste/minuto).
+
+### Ottenere API Key Gemini (gratis):
+1. Vai su https://makersuite.google.com/app/apikey
+2. Clicca "Create API Key"
+3. Copia la chiave
+
+### Configurazione:
+| Variabile | Obbligatoria | Valore | Descrizione |
+|-----------|-------------|--------|-------------|
+| `GEMINI_API_KEY` | ❌ No | `AIza...` | Chiave API Gemini (gratis!) |
+| `IMAGE_CHECK_CONFIDENCE` | ❌ No | `70` | Soglia confidenza 0-100 |
+
+### Note:
+- Se `GEMINI_API_KEY` non è configurata, il bot funziona comunque senza verifica foto
+- Google Gemini è GRATIS fino a 60 richieste/minuto
+- Il modello usato è `gemini-1.5-flash` (veloce e gratuito)
+- La verifica foto controlla:
+  - ✅ Tuta COMPLETA (felpa/giacca + pantalone)
+  - ✅ Squadra corretta
+  - ✅ Taglia adulto (non bambino)
+
 ## 📱 Notifiche Discord
 
 Esempio notifica:
