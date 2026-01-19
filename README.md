@@ -179,6 +179,17 @@ Actions → Ultima esecuzione → find-deals
 - Verifica file sia in `.github/workflows/vinted-bot.yml`
 - Controlla Actions sia abilitato
 
+**❌ Verifica foto non funziona**
+- Controlla OPENAI_API_KEY sia configurata correttamente
+- Verifica credito OpenAI disponibile
+- Controlla log per errori API
+- Riduci IMAGE_CHECK_CONFIDENCE se troppi articoli vengono rifiutati
+
+**❌ "Invalid size" o troppi rifiuti**
+- Il filtro taglie è rigoroso (solo S, M, L, XL)
+- Verifica che gli articoli abbiano taglia specificata
+- Cerca articoli con taglia adulto esplicita
+
 ## 📈 Prestazioni
 
 - **Frequenza:** Ogni 5 minuti (288 check/giorno)
@@ -211,11 +222,11 @@ Actions → Ultima esecuzione → find-deals
 
 ## 📝 File Necessari
 
-Per GitHub Actions servono SOLO 4 file:
+Per GitHub Actions servono SOLO questi file:
 
 1. `vinted_scraper.py` - Logica scraping
-2. `vinted_bot.py` - Bot principale
-3. `requirements.txt` - Dipendenze (solo requests)
+2. `vinted_bot.py` - Bot principale + ImageAnalyzer
+3. `requirements.txt` - Dipendenze (requests, openai)
 4. `.github/workflows/vinted-bot.yml` - Workflow Actions
 
 ## 🆘 Supporto
