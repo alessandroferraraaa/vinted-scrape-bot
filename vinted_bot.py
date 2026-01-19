@@ -9,7 +9,7 @@ import requests
 import base64
 import re
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 from vinted_scraper import VintedScraper
 
 try:
@@ -45,7 +45,7 @@ class ImageAnalyzer:
         else:
             print("⚠️ GEMINI_API_KEY non configurata - verifica foto disattivata")
     
-    def _download_image(self, url: str) -> bytes:
+    def _download_image(self, url: str) -> Optional[bytes]:
         """Scarica immagine da URL"""
         try:
             response = requests.get(url, timeout=10)
@@ -56,6 +56,21 @@ class ImageAnalyzer:
         except Exception as e:
             print(f"⚠️ Errore download immagine: {e}")
             return None
+    
+    def _get_mime_type(self, image_data: bytes) -> str:
+        """Determina il MIME type dall'immagine"""
+        # Check magic bytes for common image formats
+        if image_data.startswith(b'\xFF\xD8\xFF'):
+            return "image/jpeg"
+        elif image_data.startswith(b'\x89PNG\r\n\x1a\n'):
+            return "image/png"
+        elif image_data.startswith(b'GIF87a') or image_data.startswith(b'GIF89a'):
+            return "image/gif"
+        elif image_data.startswith(b'RIFF') and b'WEBP' in image_data[:12]:
+            return "image/webp"
+        else:
+            # Default to JPEG if unknown
+            return "image/jpeg"
     
     def verifica_tuta(self, photo_urls: List[str], squadra_attesa: str) -> Dict:
         """
@@ -92,8 +107,9 @@ class ImageAnalyzer:
             for url in photo_urls[:3]:
                 img_data = self._download_image(url)
                 if img_data:
+                    mime_type = self._get_mime_type(img_data)
                     images.append({
-                        "mime_type": "image/jpeg",
+                        "mime_type": mime_type,
                         "data": base64.b64encode(img_data).decode('utf-8')
                     })
             
