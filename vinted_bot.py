@@ -66,11 +66,12 @@ class ImageAnalyzer:
             return "image/png"
         elif image_data.startswith(b'GIF87a') or image_data.startswith(b'GIF89a'):
             return "image/gif"
-        elif image_data.startswith(b'RIFF') and b'WEBP' in image_data[:12]:
-            return "image/webp"
-        else:
-            # Default to JPEG if unknown
-            return "image/jpeg"
+        elif image_data.startswith(b'RIFF'):
+            # Check if it's WebP by looking at bytes 8-12
+            if b'WEBP' in image_data[8:12]:
+                return "image/webp"
+        # Default to JPEG if unknown
+        return "image/jpeg"
     
     def verifica_tuta(self, photo_urls: List[str], squadra_attesa: str) -> Dict:
         """
@@ -425,8 +426,10 @@ class ItemFilter:
         # 4. Verifica foto con Gemini (se abilitato)
         if image_analyzer and image_analyzer.enabled:
             photo_urls = item.get("photos", [])
-            if not photo_urls and item.get("photo"):
-                photo_urls = [item.get("photo")]
+            if not photo_urls:
+                photo = item.get("photo")
+                if photo:  # Only add if photo is not None
+                    photo_urls = [photo]
             
             if photo_urls:
                 img_result = image_analyzer.verifica_tuta(photo_urls, squadra_nome)
@@ -439,10 +442,12 @@ class ItemFilter:
                         motivo_parti.append("squadra non corrisponde")
                     if not img_result.get("taglia_adulto"):
                         motivo_parti.append("sembra taglia bambino")
+                    if img_result.get("confidenza", 0) < image_analyzer.confidence_threshold:
+                        motivo_parti.append(f"confidenza bassa ({img_result.get('confidenza', 0)}%)")
                     
                     return {
                         "valido": False,
-                        "motivo": f"❌ Verifica foto: {', '.join(motivo_parti)}",
+                        "motivo": f"❌ Verifica foto: {', '.join(motivo_parti) if motivo_parti else 'non valida'}",
                         "squadra": squadra_nome,
                         "img_result": img_result
                     }
