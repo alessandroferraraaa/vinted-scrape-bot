@@ -107,11 +107,17 @@ class VintedScraper:
                         if not url or not url.startswith("http"):
                             url = f"{self.base_url}/items/{item_id}"
 
-                        # Foto
+                        # Foto (tutte, non solo la prima)
                         photo = ""
+                        photo_urls = []
                         photos = item.get("photos", [])
                         if photos and len(photos) > 0:
                             photo = photos[0].get("url", "")
+                            # Estrai tutte le foto (max 5 per efficienza)
+                            for p in photos[:5]:
+                                url_foto = p.get("url", "")
+                                if url_foto:
+                                    photo_urls.append(url_foto)
 
                         # Brand e taglia
                         brand = item.get("brand_title", "")
@@ -119,6 +125,9 @@ class VintedScraper:
 
                         # Descrizione (importante per i filtri!)
                         description = item.get("description", "")
+                        
+                        # Timestamp creazione (per filtro tempo)
+                        created_at_ts = item.get("created_at_ts")
 
                         items.append({
                             "id": item_id,
@@ -127,8 +136,10 @@ class VintedScraper:
                             "price": price,
                             "url": url,
                             "photo": photo,
+                            "photo_urls": photo_urls,
                             "brand": brand,
-                            "size": size
+                            "size": size,
+                            "created_at_ts": created_at_ts
                         })
 
                     except Exception as e:

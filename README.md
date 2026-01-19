@@ -10,6 +10,10 @@ Bot automatico che trova deal su Vinted e ti notifica su Discord. Ottimizzato pe
 - 🚀 100% gratuito su GitHub Actions
 - 💾 Tracking automatico deal già notificati
 - 📊 Statistiche dettagliate
+- 🏷️ **Filtro taglie rigoroso** (solo S, M, L, XL adulto)
+- 📸 **Verifica foto con AI** (OpenAI GPT-4o Vision)
+- ⚽ **Squadre specifiche** (11 club + 3 nazionali)
+- ⏱️ **Solo ultimi 20 minuti** (articoli recenti)
 
 ## 🚀 Setup (5 minuti)
 
@@ -53,6 +57,18 @@ Nel repository:
 4. **Value:** (il tuo webhook)
 5. Add secret
 
+### 6. (Opzionale) Abilita Verifica Foto AI
+
+Per attivare la verifica automatica delle foto con AI:
+
+1. Crea account OpenAI: https://platform.openai.com/
+2. Genera API Key: https://platform.openai.com/api-keys
+3. Aggiungi secret **`OPENAI_API_KEY`** con la tua chiave
+4. Il bot verificherà automaticamente:
+   - ✅ Tuta completa (felpa + pantalone visibili)
+   - ✅ Squadra corretta
+   - ✅ Taglia adulto (non bambino)
+
 ### ✅ Fatto!
 
 Il bot parte automaticamente ogni 5 minuti!
@@ -71,18 +87,65 @@ Aggiungi altri secrets per personalizzare:
 
 | Secret | Default | Descrizione |
 |--------|---------|-------------|
-| `SEARCH_QUERY` | `tuta calcio` | Cosa cercare |
+| `DISCORD_WEBHOOK_URL` | - | **Obbligatorio** - URL webhook Discord |
+| `OPENAI_API_KEY` | - | Opzionale - Abilita verifica foto AI |
+| `SEARCH_QUERY` | `tuta calcio completa` | Cosa cercare |
 | `MAX_PRICE` | `20` | Prezzo massimo € |
 | `MIN_PRICE` | `1` | Prezzo minimo € |
+| `ENABLE_IMAGE_CHECK` | `true` | Attiva/disattiva verifica foto |
+| `IMAGE_CHECK_CONFIDENCE` | `70` | Soglia confidenza AI (0-100) |
+
+## 🏷️ Filtro Taglie
+
+Il bot accetta **SOLO** taglie adulto:
+- ✅ **Accettate:** S, M, L, XL
+- ❌ **Escluse:** 
+  - Bambino: XS, 2-3, 3-4, 4-5, 104cm, 110cm, etc.
+  - Troppo grandi: XXL, XXXL, 2XL, 3XL
+  - Parole chiave bambino: enfant, kids, bambino, junior, etc.
+
+## ⚽ Squadre Monitorate
+
+**CLUB (11):**
+- Liverpool, Barcelona, Real Madrid, Arsenal
+- PSG, Marsiglia, Lione
+- Bayern Monaco, Manchester City, Manchester United
+- Borussia Dortmund
+
+**NAZIONALI (3):**
+- Argentina 🇦🇷
+- Spagna 🇪🇸
+- Francia 🇫🇷
+
+## 📸 Verifica Foto con AI
+
+Se configurata `OPENAI_API_KEY`, il bot analizza le foto per verificare:
+
+1. **Completezza:** Entrambi i pezzi visibili (felpa + pantalone)
+2. **Squadra:** Stemmi, loghi, colori corrispondono
+3. **Taglia:** Sembra adulto, non bambino
+4. **Confidenza:** Quanto è sicuro (min 70%)
+
+L'articolo viene notificato **SOLO** se passa tutti i controlli.
+
+### Costi AI
+- ~$0.01 ogni 10-20 articoli verificati
+- Consigliato: budget iniziale $5/mese
 
 ## 📱 Notifiche Discord
 
 Esempio notifica:
 
-> **🔥🔥🔥 TUTA CALCIO INTER NIKE**
+> **🔥🔥🔥 TUTA CALCIO LIVERPOOL NIKE**
 > 
 > **💰 Prezzo: €12.50**
+> **⚽ Liverpool**
+> **✅ Tuta COMPLETA senza difetti**
+> **🆕 Pubblicato da pochi minuti!**
+> **✅ Foto verificata AI (85%)**
 > 
+> 🏷️ Brand: Nike
+> 📏 Taglia: M
 > 🆔 ID: 123456789  
 > 🔗 [Vedi su Vinted]
 > 
@@ -116,6 +179,17 @@ Actions → Ultima esecuzione → find-deals
 - Verifica file sia in `.github/workflows/vinted-bot.yml`
 - Controlla Actions sia abilitato
 
+**❌ Verifica foto non funziona**
+- Controlla OPENAI_API_KEY sia configurata correttamente
+- Verifica credito OpenAI disponibile
+- Controlla log per errori API
+- Riduci IMAGE_CHECK_CONFIDENCE se troppi articoli vengono rifiutati
+
+**❌ "Invalid size" o troppi rifiuti**
+- Il filtro taglie è rigoroso (solo S, M, L, XL)
+- Verifica che gli articoli abbiano taglia specificata
+- Cerca articoli con taglia adulto esplicita
+
 ## 📈 Prestazioni
 
 - **Frequenza:** Ogni 5 minuti (288 check/giorno)
@@ -148,11 +222,11 @@ Actions → Ultima esecuzione → find-deals
 
 ## 📝 File Necessari
 
-Per GitHub Actions servono SOLO 4 file:
+Per GitHub Actions servono SOLO questi file:
 
 1. `vinted_scraper.py` - Logica scraping
-2. `vinted_bot.py` - Bot principale
-3. `requirements.txt` - Dipendenze (solo requests)
+2. `vinted_bot.py` - Bot principale + ImageAnalyzer
+3. `requirements.txt` - Dipendenze (requests, openai)
 4. `.github/workflows/vinted-bot.yml` - Workflow Actions
 
 ## 🆘 Supporto
