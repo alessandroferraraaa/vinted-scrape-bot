@@ -28,7 +28,12 @@ class ImageAnalyzer:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "")
         self.enabled = bool(self.api_key) and GEMINI_AVAILABLE
-        self.confidence_threshold = int(os.getenv("IMAGE_CHECK_CONFIDENCE", "70"))
+        
+        # Safe parsing of confidence threshold
+        try:
+            self.confidence_threshold = int(os.getenv("IMAGE_CHECK_CONFIDENCE", "70"))
+        except (ValueError, TypeError):
+            self.confidence_threshold = 70
         
         if not GEMINI_AVAILABLE and self.api_key:
             print("⚠️ google-generativeai non installato - verifica foto disattivata")
@@ -46,9 +51,11 @@ class ImageAnalyzer:
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
                 return response.content
+            else:
+                return None
         except Exception as e:
             print(f"⚠️ Errore download immagine: {e}")
-        return None
+            return None
     
     def verifica_tuta(self, photo_urls: List[str], squadra_attesa: str) -> Dict:
         """

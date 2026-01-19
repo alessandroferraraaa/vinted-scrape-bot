@@ -88,7 +88,6 @@ La verifica foto usa **Google Gemini** che è **GRATUITO** (60 richieste/minuto)
 | Variabile | Obbligatoria | Valore | Descrizione |
 |-----------|-------------|--------|-------------|
 | `GEMINI_API_KEY` | ❌ No | `AIza...` | Chiave API Gemini (gratis!) |
-| `ENABLE_IMAGE_CHECK` | ❌ No | `true`/`false` | Attiva verifica foto |
 | `IMAGE_CHECK_CONFIDENCE` | ❌ No | `70` | Soglia confidenza 0-100 |
 
 ### Note:
