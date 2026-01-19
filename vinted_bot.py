@@ -46,8 +46,31 @@ class ImageAnalyzer:
             print("⚠️ GEMINI_API_KEY non configurata - verifica foto disattivata")
     
     def _download_image(self, url: str) -> Optional[bytes]:
-        """Scarica immagine da URL"""
+        """Scarica immagine da URL con validazione sicurezza"""
         try:
+            # Validazione URL per prevenire SSRF
+            if not url or not isinstance(url, str):
+                return None
+            
+            # Permetti solo HTTP/HTTPS
+            if not url.startswith(('http://', 'https://')):
+                return None
+            
+            # Blocca URL a servizi interni
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            hostname = parsed.hostname
+            
+            if hostname:
+                hostname_lower = hostname.lower()
+                # Blocca localhost e IP privati
+                blocked_hosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
+                if hostname_lower in blocked_hosts:
+                    return None
+                # Blocca IP privati (pattern semplice)
+                if hostname_lower.startswith(('10.', '172.16.', '192.168.', '169.254.')):
+                    return None
+            
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
                 return response.content
@@ -66,7 +89,7 @@ class ImageAnalyzer:
             return "image/png"
         elif image_data.startswith(b'GIF87a') or image_data.startswith(b'GIF89a'):
             return "image/gif"
-        elif image_data.startswith(b'RIFF'):
+        elif image_data.startswith(b'RIFF') and len(image_data) >= 12:
             # Check if it's WebP by looking at bytes 8-12
             if b'WEBP' in image_data[8:12]:
                 return "image/webp"
