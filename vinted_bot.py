@@ -23,6 +23,15 @@ def get_float_env(key: str, default: float) -> float:
     except (ValueError, TypeError):
         return default
 
+def get_int_env(key: str, default: int) -> int:
+    value = os.getenv(key, "")
+    if not value or value.strip() == "":
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
 CONFIG = {
     "search_query": os.getenv("SEARCH_QUERY", "").strip() or "tuta calcio completa",
     "max_price": get_float_env("MAX_PRICE", 20.0),
@@ -31,7 +40,10 @@ CONFIG = {
     "discord_webhook_url": os.getenv("DISCORD_WEBHOOK_URL", "").strip(),
     "notified_deals_file": "notified_deals.json",
     "stats_file": "bot_stats.json",
-    "max_age_minutes": 20
+    "max_age_minutes": 20,
+    "openai_api_key": os.getenv("OPENAI_API_KEY", "").strip(),
+    "enable_image_check": os.getenv("ENABLE_IMAGE_CHECK", "true").lower() == "true",
+    "image_check_confidence": get_int_env("IMAGE_CHECK_CONFIDENCE", 70)
 }
 
 # ============================================
@@ -78,26 +90,51 @@ SEARCH_QUERIES = [
     "psg tracksuit"
 ]
 
-# Squadre + Nazionali
+# Squadre + Nazionali (SOLO QUESTE)
 SQUADRE_NAZIONALI = {
     # CLUB
     "liverpool": ["liverpool", "lfc"],
     "barcelona": ["barcellona", "barcelona", "barça", "barca", "fcb"],
-    "real_madrid": ["real madrid", "madrid"],
-    "arsenal": ["arsenal", "afc"],
+    "real_madrid": ["real madrid", "madrid", "real"],
+    "arsenal": ["arsenal", "afc", "gunners"],
     "psg": ["psg", "paris saint germain", "paris sg"],
-    "marsiglia": ["marseille", "olympique marseille"],
-    "lione": ["lyon", "olympique lyonnais"],
+    "marsiglia": ["marseille", "olympique marseille", "om"],
+    "lione": ["lyon", "olympique lyonnais", "ol"],
     "bayern": ["bayern", "bayern monaco", "bayern munich", "fc bayern"],
-    "man_city": ["manchester city", "man city", "mcfc"],
-    "man_united": ["manchester united", "man united", "mufc"],
+    "man_city": ["manchester city", "man city", "mcfc", "city"],
+    "man_united": ["manchester united", "man united", "mufc", "united"],
     "dortmund": ["borussia dortmund", "dortmund", "bvb"],
 
     # NAZIONALI
-    "argentina": ["argentina", "argentine", "albiceleste"],
+    "argentina": ["argentina", "argentine", "albiceleste", "afa"],
     "francia": ["francia", "france", "bleus", "les bleus", "equipe de france", "fff"],
     "spagna": ["spagna", "spain", "españa", "espagne", "la roja", "rfef"]
 }
+
+# Taglie ACCETTATE (solo queste - adulto)
+TAGLIE_ACCETTATE = ["s", "m", "l", "xl"]
+
+# Taglie ESCLUSE - bambino
+TAGLIE_BAMBINO_NUMERICHE = [
+    "2-3", "3-4", "4-5", "5-6", "6-7", "7-8", "8-9", "9-10", 
+    "10-11", "11-12", "12-13", "13-14"
+]
+
+TAGLIE_BAMBINO_CM = [
+    "104", "110", "116", "122", "128", "134", "140", "146", "152", "158", "164"
+]
+
+# Taglie troppo piccole/grandi
+TAGLIE_FUORI_RANGE = [
+    "xs", "xxs", "xxxs", "xxl", "xxxl", "2xl", "3xl"
+]
+
+# Parole chiave bambino (multi-lingua)
+PAROLE_BAMBINO = [
+    "enfant", "kids", "bambino", "bambini", "child", "children", 
+    "junior", "jr", "ragazzo", "ragazza", "garcon", "fille", 
+    "boy", "girl", "youth", "jeune"
+]
 
 # Parole che indicano difetti (multi-lingua)
 PAROLE_DIFETTI = [
@@ -140,8 +177,186 @@ PAROLE_COMPLETA = [
 ]
 
 
+class ImageAnalyzer:
+    """Analizzatore foto con OpenAI GPT-4o Vision"""
+    
+    def __init__(self, api_key: str = ""):
+        self.enabled = False
+        self.client = None
+        
+        if api_key:
+            try:
+                import openai
+                self.client = openai.OpenAI(api_key=api_key)
+                self.enabled = True
+                print("✅ ImageAnalyzer abilitato (OpenAI Vision)")
+            except ImportError:
+                print("⚠️ OpenAI non installato - pip install openai>=1.0.0")
+            except Exception as e:
+                print(f"⚠️ Errore inizializzazione OpenAI: {e}")
+        else:
+            print("⚠️ OPENAI_API_KEY non configurata - verifica foto disabilitata")
+    
+    def verifica_tuta(self, photo_urls: List[str], squadra_attesa: str, confidence_threshold: int = 70) -> Dict:
+        """
+        Analizza le foto per verificare:
+        1. È una tuta COMPLETA (felpa/giacca + pantalone visibili)?
+        2. È della squadra corretta?
+        3. È taglia adulto (non bambino)?
+        
+        Returns:
+            {
+                "completa": True/False,
+                "squadra_corretta": True/False,
+                "taglia_adulto": True/False,
+                "confidenza": 0-100,
+                "note": "descrizione"
+            }
+        """
+        if not self.enabled:
+            return {
+                "completa": True,
+                "squadra_corretta": True,
+                "taglia_adulto": True,
+                "confidenza": 0,
+                "note": "Verifica foto disabilitata"
+            }
+        
+        try:
+            # Limita a max 3 foto per risparmiare token
+            urls_to_check = photo_urls[:3]
+            
+            if not urls_to_check:
+                return {
+                    "completa": False,
+                    "squadra_corretta": False,
+                    "taglia_adulto": False,
+                    "confidenza": 0,
+                    "note": "Nessuna foto disponibile"
+                }
+            
+            # Costruisci prompt
+            prompt = f"""Analizza queste foto di un articolo Vinted. Devi verificare se è una TUTA DA CALCIO.
+
+Rispondi SOLO in formato JSON con questi campi:
+{{
+    "completa": true/false,  // TRUE solo se vedi ENTRAMBI: felpa/giacca E pantalone
+    "squadra_corretta": true/false,  // TRUE se la tuta è della squadra: {squadra_attesa}
+    "taglia_adulto": true/false,  // TRUE se sembra taglia adulto, FALSE se bambino
+    "confidenza": 0-100,  // quanto sei sicuro della risposta
+    "note": "breve descrizione di cosa vedi"
+}}
+
+IMPORTANTE:
+- "completa" = TRUE solo se nelle foto si vedono ENTRAMBI i pezzi (sopra + sotto)
+- Cerca stemmi, loghi, colori della squadra per verificare
+- Se vedi solo la maglia o solo il pantalone = FALSE
+- Se non riesci a determinare la squadra = FALSE"""
+            
+            # Prepara messaggi per API
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt}
+                    ]
+                }
+            ]
+            
+            # Aggiungi immagini
+            for url in urls_to_check:
+                messages[0]["content"].append({
+                    "type": "image_url",
+                    "image_url": {"url": url}
+                })
+            
+            # Chiamata API OpenAI
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=300,
+                temperature=0.3
+            )
+            
+            # Parse risposta
+            content = response.choices[0].message.content
+            
+            # Estrai JSON dalla risposta
+            import re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                
+                # Valida campi
+                required_fields = ["completa", "squadra_corretta", "taglia_adulto", "confidenza", "note"]
+                if all(field in result for field in required_fields):
+                    # Verifica soglia confidenza
+                    if result["confidenza"] < confidence_threshold:
+                        result["completa"] = False
+                        result["note"] = f"Confidenza troppo bassa ({result['confidenza']}%)"
+                    
+                    return result
+            
+            # Se non riesce a parsare
+            return {
+                "completa": False,
+                "squadra_corretta": False,
+                "taglia_adulto": False,
+                "confidenza": 0,
+                "note": "Errore parsing risposta AI"
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Errore verifica foto: {e}")
+            return {
+                "completa": False,
+                "squadra_corretta": False,
+                "taglia_adulto": False,
+                "confidenza": 0,
+                "note": f"Errore API: {str(e)[:100]}"
+            }
+
+
 class ItemFilter:
     """Filtro ULTRA-PRECISO"""
+
+    @staticmethod
+    def is_taglia_valida(size: str, text: str) -> tuple:
+        """
+        Verifica che la taglia sia adulto (S, M, L, XL) e NON bambino
+        Returns: (valido: bool, motivo: str)
+        """
+        if not size:
+            return False, "Taglia non specificata"
+        
+        size_lower = size.lower().strip()
+        text_lower = text.lower()
+        
+        # 1. Verifica parole chiave bambino nel testo
+        for parola in PAROLE_BAMBINO:
+            if parola in text_lower:
+                return False, f"Contiene parola bambino: '{parola}'"
+        
+        # 2. Verifica taglie bambino numeriche
+        for taglia in TAGLIE_BAMBINO_NUMERICHE:
+            if taglia in size_lower or taglia in text_lower:
+                return False, f"Taglia bambino numerica: {taglia}"
+        
+        # 3. Verifica taglie bambino in cm
+        for taglia in TAGLIE_BAMBINO_CM:
+            if taglia in size_lower or f"{taglia}cm" in text_lower or f"{taglia} cm" in text_lower:
+                return False, f"Taglia bambino cm: {taglia}"
+        
+        # 4. Verifica taglie fuori range (XS, XXL, etc.)
+        for taglia in TAGLIE_FUORI_RANGE:
+            if size_lower == taglia or f" {taglia} " in f" {text_lower} ":
+                return False, f"Taglia fuori range: {taglia.upper()}"
+        
+        # 5. Verifica che sia ESATTAMENTE una delle taglie accettate
+        if size_lower not in TAGLIE_ACCETTATE:
+            return False, f"Taglia non valida: {size} (solo S, M, L, XL)"
+        
+        return True, f"Taglia valida: {size.upper()}"
 
     @staticmethod
     def is_squadra_accettata(text: str) -> tuple:
@@ -203,6 +418,7 @@ class ItemFilter:
         title = item.get("title", "").lower()
         description = item.get("description", "").lower()
         brand = item.get("brand", "").lower()
+        size = item.get("size", "")
 
         text_completo = f"{title} {description} {brand}"
 
@@ -232,10 +448,20 @@ class ItemFilter:
                 "squadra": squadra_nome
             }
 
+        # 4. Verifica taglia (NUOVO)
+        is_valid_size, motivo_taglia = ItemFilter.is_taglia_valida(size, text_completo)
+        if not is_valid_size:
+            return {
+                "valido": False,
+                "motivo": f"❌ Taglia: {motivo_taglia}",
+                "squadra": squadra_nome
+            }
+
         return {
             "valido": True,
             "motivo": f"✅ {motivo_completezza}",
-            "squadra": squadra_nome
+            "squadra": squadra_nome,
+            "taglia": size
         }
 
 
@@ -301,12 +527,20 @@ class NotificationManager:
                 f"**✅ Tuta COMPLETA senza difetti**",
                 f"**🆕 Pubblicato da pochi minuti!**"
             ]
+            
+            # Aggiungi info verifica foto
+            verifica_foto = item.get("verifica_foto")
+            if verifica_foto and verifica_foto.get("confidenza", 0) > 0:
+                desc_parts.append(f"**✅ Foto verificata AI ({verifica_foto['confidenza']}%)**")
+            elif verifica_foto is None:
+                desc_parts.append(f"**⚠️ Verifica foto disabilitata**")
 
             fields = []
             if item.get("brand"):
                 fields.append({"name": "🏷️ Brand", "value": item["brand"], "inline": True})
-            if item.get("size"):
-                fields.append({"name": "📏 Taglia", "value": item["size"], "inline": True})
+            if item.get("size") or item.get("taglia"):
+                taglia = item.get("size") or item.get("taglia", "N/D")
+                fields.append({"name": "📏 Taglia", "value": taglia.upper(), "inline": True})
             fields.append({"name": "🆔 ID", "value": item.get("id", "N/D"), "inline": True})
 
             embed = {
@@ -336,6 +570,7 @@ class VintedBot:
         self.config = CONFIG
         self.deal_manager = DealManager(CONFIG["notified_deals_file"])
         self.scraper = VintedScraper()
+        self.image_analyzer = ImageAnalyzer(CONFIG["openai_api_key"]) if CONFIG["enable_image_check"] else None
         self.stats = {
             'timestamp': datetime.now().isoformat(),
             'queries_searched': 0,
@@ -346,7 +581,9 @@ class VintedBot:
             'filtri': {
                 'squadra_sbagliata': 0,
                 'non_completa': 0,
-                'con_difetti': 0
+                'con_difetti': 0,
+                'taglia_invalida': 0,
+                'foto_non_valida': 0
             }
         }
 
@@ -359,6 +596,11 @@ class VintedBot:
         print(f"⚽ {len(SQUADRE_NAZIONALI)} squadre/nazionali monitorate")
         print(f"🔍 {len(SEARCH_QUERIES)} query di ricerca")
         print(f"⏱️  Solo ultimi {self.config['max_age_minutes']} minuti")
+        
+        if self.image_analyzer and self.image_analyzer.enabled:
+            print(f"📸 Verifica foto AI: ABILITATA (confidenza min: {self.config['image_check_confidence']}%)")
+        else:
+            print(f"📸 Verifica foto AI: DISABILITATA")
 
         if not self.config['discord_webhook_url']:
             print("⚠️ WARNING: Discord webhook non configurato!")
@@ -428,8 +670,33 @@ class VintedBot:
             if result["valido"]:
                 item["squadra"] = result["squadra"]
                 item["motivo_validazione"] = result["motivo"]
+                item["taglia"] = result.get("taglia", "")
+                
+                # Verifica foto con AI (se abilitata)
+                if self.image_analyzer and self.image_analyzer.enabled:
+                    photo_urls = item.get("photo_urls", [item.get("photo", "")])
+                    photo_urls = [url for url in photo_urls if url]  # Rimuovi URL vuoti
+                    
+                    verifica = self.image_analyzer.verifica_tuta(
+                        photo_urls, 
+                        result["squadra"],
+                        self.config["image_check_confidence"]
+                    )
+                    
+                    item["verifica_foto"] = verifica
+                    
+                    # Articolo valido SOLO se passa tutti i controlli foto
+                    if not (verifica["completa"] and verifica["squadra_corretta"] and verifica["taglia_adulto"]):
+                        print(f"   ❌ {item['title'][:60]} - FOTO: {verifica['note']}")
+                        self.stats['filtri']['foto_non_valida'] += 1
+                        continue
+                    
+                    print(f"   ✅ {item['title'][:60]} - {result['squadra']} (AI: {verifica['confidenza']}%)")
+                else:
+                    item["verifica_foto"] = None
+                    print(f"   ✅ {item['title'][:60]} - {result['squadra']}")
+                
                 filtered.append(item)
-                print(f"   ✅ {item['title'][:60]} - {result['squadra']}")
             else:
                 motivo = result["motivo"].lower()
                 if "squadra" in motivo or "nazionale" in motivo:
@@ -438,6 +705,8 @@ class VintedBot:
                     self.stats['filtri']['non_completa'] += 1
                 elif "difetti" in motivo:
                     self.stats['filtri']['con_difetti'] += 1
+                elif "taglia" in motivo:
+                    self.stats['filtri']['taglia_invalida'] += 1
 
         self.stats['items_filtered'] = len(filtered)
 
@@ -446,6 +715,9 @@ class VintedBot:
         print(f"   ❌ Squadra errata: {self.stats['filtri']['squadra_sbagliata']}")
         print(f"   ❌ Non completa: {self.stats['filtri']['non_completa']}")
         print(f"   ❌ Con difetti: {self.stats['filtri']['con_difetti']}")
+        print(f"   ❌ Taglia invalida: {self.stats['filtri']['taglia_invalida']}")
+        if self.image_analyzer and self.image_analyzer.enabled:
+            print(f"   ❌ Foto non valida: {self.stats['filtri']['foto_non_valida']}")
 
         return filtered
 
