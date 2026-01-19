@@ -6,9 +6,176 @@ import os
 import time
 import json
 import requests
+import base64
+import re
 from datetime import datetime
 from typing import List, Dict
 from vinted_scraper import VintedScraper
+
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
+# ============================================
+# IMAGE ANALYZER WITH GEMINI
+# ============================================
+
+class ImageAnalyzer:
+    """Analizza foto usando Google Gemini (GRATIS!)"""
+    
+    def __init__(self):
+        self.api_key = os.getenv("GEMINI_API_KEY", "")
+        self.enabled = bool(self.api_key) and GEMINI_AVAILABLE
+        self.confidence_threshold = int(os.getenv("IMAGE_CHECK_CONFIDENCE", "70"))
+        
+        if not GEMINI_AVAILABLE and self.api_key:
+            print("⚠️ google-generativeai non installato - verifica foto disattivata")
+            self.enabled = False
+        elif self.enabled:
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            print("✅ Gemini Vision attivo (GRATIS!)")
+        else:
+            print("⚠️ GEMINI_API_KEY non configurata - verifica foto disattivata")
+    
+    def _download_image(self, url: str) -> bytes:
+        """Scarica immagine da URL"""
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                return response.content
+        except Exception as e:
+            print(f"⚠️ Errore download immagine: {e}")
+        return None
+    
+    def verifica_tuta(self, photo_urls: List[str], squadra_attesa: str) -> Dict:
+        """
+        Analizza le foto per verificare:
+        1. È una tuta COMPLETA (felpa/giacca + pantalone visibili)?
+        2. È della squadra corretta?
+        3. È taglia adulto (non bambino)?
+        
+        Returns:
+            {
+                "completa": True/False,
+                "squadra_corretta": True/False,
+                "taglia_adulto": True/False,
+                "confidenza": 0-100,
+                "note": "descrizione",
+                "verificato": True/False
+            }
+        """
+        
+        # Default se verifica disabilitata
+        if not self.enabled:
+            return {
+                "completa": True,
+                "squadra_corretta": True,
+                "taglia_adulto": True,
+                "confidenza": 0,
+                "note": "Verifica foto disabilitata",
+                "verificato": False
+            }
+        
+        try:
+            # Scarica max 3 immagini
+            images = []
+            for url in photo_urls[:3]:
+                img_data = self._download_image(url)
+                if img_data:
+                    images.append({
+                        "mime_type": "image/jpeg",
+                        "data": base64.b64encode(img_data).decode('utf-8')
+                    })
+            
+            if not images:
+                return {
+                    "completa": True,
+                    "squadra_corretta": True,
+                    "taglia_adulto": True,
+                    "confidenza": 0,
+                    "note": "Impossibile scaricare immagini",
+                    "verificato": False
+                }
+            
+            # Prompt per Gemini
+            prompt = f"""Analizza queste foto di un articolo Vinted. Devi verificare se è una TUTA DA CALCIO.
+
+Rispondi SOLO in formato JSON (senza markdown, senza ```json```) con questi campi:
+{{
+    "completa": true/false,
+    "squadra_corretta": true/false,
+    "taglia_adulto": true/false,
+    "confidenza": 0-100,
+    "note": "breve descrizione"
+}}
+
+REGOLE:
+- "completa" = TRUE solo se nelle foto si vedono ENTRAMBI: felpa/giacca E pantalone
+- "squadra_corretta" = TRUE se la tuta è della squadra: {squadra_attesa}
+- Cerca stemmi, loghi, sponsor, colori ufficiali della squadra
+- "taglia_adulto" = TRUE se sembra taglia adulto, FALSE se sembra bambino
+- Se vedi solo la maglia o solo il pantalone = completa FALSE
+- Se non riesci a determinare la squadra = squadra_corretta FALSE
+
+Rispondi SOLO con il JSON, nient'altro."""
+
+            # Prepara contenuto per Gemini
+            content = [prompt]
+            for img in images:
+                content.append({
+                    "mime_type": img["mime_type"],
+                    "data": img["data"]
+                })
+            
+            # Chiamata a Gemini
+            response = self.model.generate_content(content)
+            response_text = response.text.strip()
+            
+            # Pulisci risposta (rimuovi eventuale markdown)
+            response_text = re.sub(r'^```json\s*', '', response_text)
+            response_text = re.sub(r'\s*```$', '', response_text)
+            
+            # Parse JSON
+            result = json.loads(response_text)
+            result["verificato"] = True
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            print(f"⚠️ Errore parsing risposta Gemini: {e}")
+            return {
+                "completa": True,
+                "squadra_corretta": True,
+                "taglia_adulto": True,
+                "confidenza": 0,
+                "note": f"Errore parsing: {str(e)[:50]}",
+                "verificato": False
+            }
+        except Exception as e:
+            print(f"⚠️ Errore Gemini: {e}")
+            return {
+                "completa": True,
+                "squadra_corretta": True,
+                "taglia_adulto": True,
+                "confidenza": 0,
+                "note": f"Errore: {str(e)[:50]}",
+                "verificato": False
+            }
+    
+    def is_valid(self, result: Dict) -> bool:
+        """Verifica se il risultato dell'analisi è valido"""
+        if not result.get("verificato", False):
+            return True  # Se non verificato, passa (fallback)
+        
+        return (
+            result.get("completa", False) and
+            result.get("squadra_corretta", False) and
+            result.get("taglia_adulto", False) and
+            result.get("confidenza", 0) >= self.confidence_threshold
+        )
 
 # ============================================
 # CONFIGURAZIONE
@@ -199,7 +366,7 @@ class ItemFilter:
         return False, "Nessun indicatore"
 
     @staticmethod
-    def filtra_articolo(item: Dict, max_age_minutes: int = 20) -> Dict:
+    def filtra_articolo(item: Dict, max_age_minutes: int = 20, image_analyzer=None) -> Dict:
         title = item.get("title", "").lower()
         description = item.get("description", "").lower()
         brand = item.get("brand", "").lower()
@@ -231,6 +398,31 @@ class ItemFilter:
                 "motivo": "❌ Ha difetti",
                 "squadra": squadra_nome
             }
+
+        # 4. Verifica foto con Gemini (se abilitato)
+        if image_analyzer and image_analyzer.enabled:
+            photo_urls = item.get("photos", [])
+            if not photo_urls and item.get("photo"):
+                photo_urls = [item.get("photo")]
+            
+            if photo_urls:
+                img_result = image_analyzer.verifica_tuta(photo_urls, squadra_nome)
+                
+                if not image_analyzer.is_valid(img_result):
+                    motivo_parti = []
+                    if not img_result.get("completa"):
+                        motivo_parti.append("foto non mostra tuta completa")
+                    if not img_result.get("squadra_corretta"):
+                        motivo_parti.append("squadra non corrisponde")
+                    if not img_result.get("taglia_adulto"):
+                        motivo_parti.append("sembra taglia bambino")
+                    
+                    return {
+                        "valido": False,
+                        "motivo": f"❌ Verifica foto: {', '.join(motivo_parti)}",
+                        "squadra": squadra_nome,
+                        "img_result": img_result
+                    }
 
         return {
             "valido": True,
@@ -336,6 +528,7 @@ class VintedBot:
         self.config = CONFIG
         self.deal_manager = DealManager(CONFIG["notified_deals_file"])
         self.scraper = VintedScraper()
+        self.image_analyzer = ImageAnalyzer()
         self.stats = {
             'timestamp': datetime.now().isoformat(),
             'queries_searched': 0,
@@ -346,7 +539,8 @@ class VintedBot:
             'filtri': {
                 'squadra_sbagliata': 0,
                 'non_completa': 0,
-                'con_difetti': 0
+                'con_difetti': 0,
+                'verifica_foto_fallita': 0
             }
         }
 
@@ -423,7 +617,7 @@ class VintedBot:
         filtered = []
 
         for item in items:
-            result = ItemFilter.filtra_articolo(item, self.config['max_age_minutes'])
+            result = ItemFilter.filtra_articolo(item, self.config['max_age_minutes'], self.image_analyzer)
 
             if result["valido"]:
                 item["squadra"] = result["squadra"]
@@ -438,6 +632,8 @@ class VintedBot:
                     self.stats['filtri']['non_completa'] += 1
                 elif "difetti" in motivo:
                     self.stats['filtri']['con_difetti'] += 1
+                elif "verifica foto" in motivo:
+                    self.stats['filtri']['verifica_foto_fallita'] += 1
 
         self.stats['items_filtered'] = len(filtered)
 
@@ -446,6 +642,8 @@ class VintedBot:
         print(f"   ❌ Squadra errata: {self.stats['filtri']['squadra_sbagliata']}")
         print(f"   ❌ Non completa: {self.stats['filtri']['non_completa']}")
         print(f"   ❌ Con difetti: {self.stats['filtri']['con_difetti']}")
+        if self.stats['filtri']['verifica_foto_fallita'] > 0:
+            print(f"   ❌ Verifica foto fallita: {self.stats['filtri']['verifica_foto_fallita']}")
 
         return filtered
 
