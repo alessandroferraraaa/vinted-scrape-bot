@@ -5,14 +5,27 @@ Ricerca MASSIVA con 20+ query multi-lingua ottimizzate
 import os
 import time
 import json
+import re
 import requests
 from datetime import datetime
 from typing import List, Dict
 from vinted_scraper import VintedScraper
 
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
 # ============================================
 # CONFIGURAZIONE
 # ============================================
+
+# Costanti ImageAnalyzer
+MAX_PHOTOS_PER_ITEM = 3
+OPENAI_MODEL = "gpt-4o"
+OPENAI_MAX_TOKENS = 300
+OPENAI_TEMPERATURE = 0.3
 
 def get_float_env(key: str, default: float) -> float:
     value = os.getenv(key, "")
@@ -184,16 +197,15 @@ class ImageAnalyzer:
         self.enabled = False
         self.client = None
         
-        if api_key:
+        if api_key and OPENAI_AVAILABLE:
             try:
-                import openai
                 self.client = openai.OpenAI(api_key=api_key)
                 self.enabled = True
                 print("✅ ImageAnalyzer abilitato (OpenAI Vision)")
-            except ImportError:
-                print("⚠️ OpenAI non installato - pip install openai>=1.0.0")
             except Exception as e:
                 print(f"⚠️ Errore inizializzazione OpenAI: {e}")
+        elif api_key and not OPENAI_AVAILABLE:
+            print("⚠️ OpenAI non installato - pip install openai>=1.0.0")
         else:
             print("⚠️ OPENAI_API_KEY non configurata - verifica foto disabilitata")
     
@@ -223,8 +235,8 @@ class ImageAnalyzer:
             }
         
         try:
-            # Limita a max 3 foto per risparmiare token
-            urls_to_check = photo_urls[:3]
+            # Limita a max N foto per risparmiare token
+            urls_to_check = photo_urls[:MAX_PHOTOS_PER_ITEM]
             
             if not urls_to_check:
                 return {
@@ -272,18 +284,17 @@ IMPORTANTE:
             
             # Chiamata API OpenAI
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model=OPENAI_MODEL,
                 messages=messages,
-                max_tokens=300,
-                temperature=0.3
+                max_tokens=OPENAI_MAX_TOKENS,
+                temperature=OPENAI_TEMPERATURE
             )
             
             # Parse risposta
             content = response.choices[0].message.content
             
-            # Estrai JSON dalla risposta
-            import re
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            # Estrai JSON dalla risposta (cerca il primo oggetto JSON valido)
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content)
             if json_match:
                 result = json.loads(json_match.group())
                 
@@ -674,7 +685,9 @@ class VintedBot:
                 
                 # Verifica foto con AI (se abilitata)
                 if self.image_analyzer and self.image_analyzer.enabled:
-                    photo_urls = item.get("photo_urls", [item.get("photo", "")])
+                    photo_urls = item.get("photo_urls", [])
+                    if not photo_urls and item.get("photo"):
+                        photo_urls = [item["photo"]]
                     photo_urls = [url for url in photo_urls if url]  # Rimuovi URL vuoti
                     
                     verifica = self.image_analyzer.verifica_tuta(
